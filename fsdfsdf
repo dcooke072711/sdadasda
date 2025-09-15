@@ -17,7 +17,6 @@ local clickId = "rbxassetid://535716488"
 local ping = 0.15
 local fps = 0
 
--- UI Creation Functions
 local function createUI()
     local screenGui = Instance.new("ScreenGui")
     screenGui.Parent = IS_STUDIO and player.PlayerGui or ((gethui and gethui()) or game:GetService("CoreGui"))
