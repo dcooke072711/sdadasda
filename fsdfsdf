@@ -1,0 +1,405 @@
+local players = game:GetService("Players")
+local runService = game:GetService("RunService")
+local userInputService = game:GetService("UserInputService")
+local debris = game:GetService("Debris")
+local statsService = game:GetService("Stats")
+local httpService = game:GetService("HttpService")
+
+local player = players.LocalPlayer
+local categoryDragging = false
+
+local DevoxHub = {}; DevoxHub.__index = DevoxHub
+
+local IS_STUDIO = runService:IsStudio()
+local indent = "  "
+
+local clickId = "rbxassetid://535716488"
+local ping = 0.15
+local fps = 0
+
+-- UI Creation Functions
+local function createUI()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Parent = IS_STUDIO and player.PlayerGui or ((gethui and gethui()) or game:GetService("CoreGui"))
+    screenGui.Name = "DevoxHubUI"
+
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Size = UDim2.new(0, 300, 0, 400)
+    mainFrame.Position = UDim2.new(0.5, -150, 0.5, -200)
+    mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    mainFrame.BorderSizePixel = 0
+    mainFrame.Parent = screenGui
+
+    local topBar = Instance.new("Frame")
+    topBar.Size = UDim2.new(1, 0, 0, 30)
+    topBar.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    topBar.BorderSizePixel = 0
+    topBar.Parent = mainFrame
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, 0, 1, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "DevoxHub"
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.Font = Enum.Font.SourceSansBold
+    title.TextSize = 16
+    title.Parent = topBar
+
+    local modulesList = Instance.new("Frame")
+    modulesList.Size = UDim2.new(0, 200, 1, -30)
+    modulesList.Position = UDim2.new(0, 0, 0, 30)
+    modulesList.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    modulesList.BorderSizePixel = 0
+    modulesList.Parent = mainFrame
+
+    local modulesScroll = Instance.new("ScrollingFrame")
+    modulesScroll.Size = UDim2.new(1, 0, 1, 0)
+    modulesScroll.BackgroundTransparency = 1
+    modulesScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    modulesScroll.ScrollBarThickness = 5
+    modulesScroll.Parent = modulesList
+
+    local uiListLayout = Instance.new("UIListLayout")
+    uiListLayout.Padding = UDim.new(0, 5)
+    uiListLayout.Parent = modulesScroll
+
+    local serverInfo = Instance.new("Frame")
+    serverInfo.Size = UDim2.new(1, 0, 0, 50)
+    serverInfo.Position = UDim2.new(0, 0, 1, -50)
+    serverInfo.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    serverInfo.BorderSizePixel = 0
+    serverInfo.Parent = mainFrame
+
+    local pingLabel = Instance.new("TextLabel")
+    pingLabel.Size = UDim2.new(0.5, 0, 1, 0)
+    pingLabel.BackgroundTransparency = 1
+    pingLabel.Text = "Ping: 0ms"
+    pingLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    pingLabel.Font = Enum.Font.SourceSans
+    pingLabel.TextSize = 14
+    pingLabel.Parent = serverInfo
+
+    local fpsLabel = Instance.new("TextLabel")
+    fpsLabel.Size = UDim2.new(0.5, 0, 1, 0)
+    fpsLabel.Position = UDim2.new(0.5, 0, 0, 0)
+    fpsLabel.BackgroundTransparency = 1
+    fpsLabel.Text = "FPS: 0"
+    fpsLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    fpsLabel.Font = Enum.Font.SourceSans
+    fpsLabel.TextSize = 14
+    fpsLabel.Parent = serverInfo
+
+    return {
+        ScreenGui = screenGui,
+        MainFrame = mainFrame,
+        TopBar = topBar,
+        ModulesScroll = modulesScroll,
+        ServerInfo = serverInfo,
+        PingLabel = pingLabel,
+        FpsLabel = fpsLabel
+    }
+end
+
+function playSound(id, vol)
+    vol = vol or 1
+    local sound = Instance.new("Sound")
+    sound.Parent = workspace
+    sound.SoundId = id
+    sound.Volume = vol
+    sound:Play()
+    debris:AddItem(sound, 3)
+end
+
+function getRainbowColor()
+    local epochTime = os.clock() * 100
+    local hue = (epochTime % 360)
+    return Color3.fromHSV(hue / 360, 1, 1)
+end
+
+function valueToColor(value, max_value)
+    value = math.max(0, math.min(value, max_value))
+    local red = math.floor((value / max_value) * 255)
+    local green = math.floor((1 - (value / max_value)) * 255)
+    return Color3.fromRGB(red, green, 0)
+end
+
+function valueToColor2(value, max_value)
+    value = math.max(0, math.min(value, max_value))
+    local red = math.floor((1 - (value / max_value)) * 255)
+    local green = math.floor((value / max_value) * 255)
+    return Color3.fromRGB(red, green, 0)
+end
+
+function getPing()
+    return statsService.PerformanceStats.Ping:GetValue()
+end
+
+function getServerPing()
+    return statsService.Network.ServerStatsItem['Data Ping']:GetValue()
+end
+
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        ping = (getPing() + getServerPing()) / 1000
+    end
+end)
+
+local Category = {}; Category.__index = Category; do
+    local Module = {}; Module.__index = Module; do
+        function Module.new(title, root, non, f)
+            local self = setmetatable({}, Module)
+            self.Title = title
+            self.Root = root
+            self.Value = false
+            self.Settings = {}
+
+            local moduleFrame = Instance.new("Frame")
+            moduleFrame.Size = UDim2.new(1, -10, 0, 30)
+            moduleFrame.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+            moduleFrame.BorderSizePixel = 0
+            moduleFrame.Parent = root.UI.ModulesScroll
+
+            local moduleText = Instance.new("TextLabel")
+            moduleText.Size = UDim2.new(1, -30, 1, 0)
+            moduleText.BackgroundTransparency = 1
+            moduleText.Text = indent .. title
+            moduleText.TextColor3 = Color3.fromRGB(255, 255, 255)
+            moduleText.Font = Enum.Font.SourceSans
+            moduleText.TextSize = 14
+            moduleText.Parent = moduleFrame
+
+            local toggleButton = Instance.new("TextButton")
+            toggleButton.Size = UDim2.new(0, 30, 1, 0)
+            toggleButton.Position = UDim2.new(1, -30, 0, 0)
+            toggleButton.BackgroundColor3 = Color3.fromRGB(0, 120, 255)
+            toggleButton.Text = ">"
+            toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+            toggleButton.Font = Enum.Font.SourceSans
+            toggleButton.TextSize = 14
+            toggleButton.Parent = moduleFrame
+
+            self.UI = moduleFrame
+            root.UI.ModulesScroll.CanvasSize = UDim2.new(0, 0, 0, root.UI.ModulesScroll.CanvasSize.Y.Offset + 35)
+
+            self.Update = function(a)
+                self.Value = not self.Value
+                moduleText.TextColor3 = self.Value and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 255, 255)
+                if not a then
+                    playSound(clickId, 0.5)
+                    (f or function() end)(a)
+                end
+            end
+
+            toggleButton.MouseButton1Click:Connect(function()
+                self.Update()
+            end)
+
+            return self
+        end
+
+        function Module:CreateToggle(data)
+            local title = data.Title
+            local callback = data.Callback or function() end
+            local value = data.Value or false
+
+            local toggleFrame = Instance.new("Frame")
+            toggleFrame.Size = UDim2.new(1, -20, 0, 25)
+            toggleFrame.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+            toggleFrame.BorderSizePixel = 0
+            toggleFrame.Parent = self.UI
+
+            local toggleText = Instance.new("TextLabel")
+            toggleText.Size = UDim2.new(1, -30, 1, 0)
+            toggleText.BackgroundTransparency = 1
+            toggleText.Text = indent .. title
+            toggleText.TextColor3 = value and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
+            toggleText.Font = Enum.Font.SourceSans
+            toggleText.TextSize = 12
+            toggleText.Parent = toggleFrame
+
+            local toggleButton = Instance.new("TextButton")
+            toggleButton.Size = UDim2.new(0, 30, 1, 0)
+            toggleButton.Position = UDim2.new(1, -30, 0, 0)
+            toggleButton.BackgroundColor3 = Color3.fromRGB(0, 120, 255)
+            toggleButton.Text = value and "On" or "Off"
+            toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+            toggleButton.Font = Enum.Font.SourceSans
+            toggleButton.TextSize = 12
+            toggleButton.Parent = toggleFrame
+
+            data.Update = function()
+                toggleText.TextColor3 = data.Value and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
+                toggleButton.Text = data.Value and "On" or "Off"
+            end
+
+            toggleButton.MouseButton1Click:Connect(function()
+                data.Value = not data.Value
+                data.Update()
+                playSound(clickId, 0.5)
+                callback(data.Value)
+            end)
+
+            data.Update()
+            self.Settings[data.Title] = data
+            return data
+        end
+    end
+
+    function Category.new(title, icon, root)
+        local self = setmetatable({}, Category)
+        self.Title = title
+        self.Root = root
+        self.Modules = {}
+
+        local categoryFrame = Instance.new("Frame")
+        categoryFrame.Size = UDim2.new(1, -10, 0, 40)
+        categoryFrame.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+        categoryFrame.BorderSizePixel = 0
+        categoryFrame.Parent = root.UI.ModulesScroll
+
+        local categoryText = Instance.new("TextLabel")
+        categoryText.Size = UDim2.new(1, -30, 0.5, 0)
+        categoryText.Position = UDim2.new(0, 0, 0, 0)
+        categoryText.BackgroundTransparency = 1
+        categoryText.Text = title
+        categoryText.TextColor3 = Color3.fromRGB(255, 255, 255)
+        categoryText.Font = Enum.Font.SourceSansBold
+        categoryText.TextSize = 16
+        categoryText.Parent = categoryFrame
+
+        local dragHandle = Instance.new("TextButton")
+        dragHandle.Size = UDim2.new(0, 30, 0.5, 0)
+        dragHandle.Position = UDim2.new(1, -30, 0, 0)
+        dragHandle.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+        dragHandle.Text = "☰"
+        dragHandle.TextColor3 = Color3.fromRGB(255, 255, 255)
+        dragHandle.Font = Enum.Font.SourceSans
+        dragHandle.TextSize = 16
+        dragHandle.Parent = categoryFrame
+
+        self.UI = categoryFrame
+        root.UI.ModulesScroll.CanvasSize = UDim2.new(0, 0, 0, root.UI.ModulesScroll.CanvasSize.Y.Offset + 45)
+
+        local dragging, dragInput, dragStart, startPos
+        dragHandle.MouseButton1Down:Connect(function(input)
+            if categoryDragging and categoryDragging ~= categoryFrame then return end
+            categoryDragging = categoryFrame
+            dragging = true
+            dragStart = input.Position
+            startPos = categoryFrame.Position
+
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    categoryDragging = nil
+                    dragging = false
+                end
+            end)
+        end)
+
+        dragHandle.InputChanged:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseMovement then
+                dragInput = input
+            end
+        end)
+
+        userInputService.InputChanged:Connect(function(input)
+            if input == dragInput and dragging then
+                local delta = input.Position - dragStart
+                categoryFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            end
+        end)
+
+        return self
+    end
+
+    function Category:CreateModule(title, n, f)
+        local module = Module.new(title, self, n, f)
+        self.Modules[title] = module
+        return module
+    end
+end
+
+function DevoxHub:Create()
+    local self = setmetatable({}, DevoxHub)
+    local ui = createUI()
+    self.UI = ui
+    self.Categories = {}
+
+    local function toggleModules()
+        ui.MainFrame.Visible = not ui.MainFrame.Visible
+    end
+
+    userInputService.InputBegan:Connect(function(input)
+        if input.KeyCode == Enum.KeyCode.LeftAlt then
+            toggleModules()
+        end
+    end)
+
+    ui.TopBar.MouseButton1Click:Connect(toggleModules)
+
+    runService.RenderStepped:Connect(function()
+        local chroma = getRainbowColor()
+        local pingColor = valueToColor(ping * 500, 200)
+        local fpsColor = valueToColor2(fps, 60)
+        ui.MainFrame.BackgroundColor3 = chroma
+        ui.PingLabel.Text = "Ping: " .. math.round(ping * 500) .. "ms"
+        ui.PingLabel.TextColor3 = pingColor
+        ui.FpsLabel.Text = "FPS: " .. fps
+        ui.FpsLabel.TextColor3 = fpsColor
+        fps = fps + 1
+        task.delay(1, function()
+            fps = fps - 1
+        end)
+    end)
+
+    return self
+end
+
+function DevoxHub:CreateCategory(title, icon)
+    local category = Category.new(title, icon, self)
+    self.Categories[title] = category
+    return category
+end
+
+function DevoxHub:Export()
+    local data = {}
+    for index, category in pairs(self.Categories) do
+        data[category.Title] = {}
+        for index, module in pairs(category.Modules) do
+            data[category.Title][module.Title] = {
+                Value = module.Value,
+                Settings = {}
+            }
+            for index, setting in pairs(module.Settings) do
+                local serialized = setting.Value
+                if typeof(serialized) == "EnumItem" then
+                    serialized = {
+                        Type = "EnumItem",
+                        Name = serialized.Name
+                    }
+                end
+                data[category.Title][module.Title].Settings[index] = serialized
+            end
+        end
+    end
+    return httpService:JSONEncode(data)
+end
+
+function DevoxHub:Import(data)
+    data = httpService:JSONDecode(data)
+    for categoryName, data in pairs(data) do
+        if not self.Categories[categoryName] then continue end
+        for moduleName, moduleData in pairs(data) do
+            if not self.Categories[categoryName].Modules[moduleName] then continue end
+            self.Categories[categoryName].Modules[moduleName].Value = not moduleData.Value
+            self.Categories[categoryName].Modules[moduleName].Update(true)
+            for index, value in pairs(moduleData.Settings) do
+                self.Categories[categoryName].Modules[moduleName].Settings[index].Value = typeof(value) == "table" and value.Type == "EnumItem" and Enum.KeyCode[value.Name] or value
+                self.Categories[categoryName].Modules[moduleName].Settings[index].Update()
+            end
+        end
+    end
+end
+
+return DevoxHub
